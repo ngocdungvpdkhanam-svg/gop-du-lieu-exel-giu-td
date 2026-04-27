@@ -1,91 +1,77 @@
+import streamlit as st
 import pandas as pd
-import tkinter as tk
-from tkinter import filedialog, messagebox, ttk
-import os
+import io
 
-class ExcelMergerApp:
-    def __init__(self, root):
-        self.root = root
-        self.root.title("Công cụ Gộp File Excel - Tùy chỉnh Tiêu đề")
-        self.root.geometry("600x400")
+# Cấu hình trang
+st.set_page_config(page_title="Excel Merger Pro", layout="wide")
 
-        self.file_paths = []
+st.title("📂 Công cụ Gộp File Excel")
+st.markdown("Tải lên các file Excel có cấu trúc giống nhau để gộp chúng thành một file duy nhất.")
 
-        # UI Elements
-        label = tk.Label(root, text="Công cụ Gộp File Excel", font=("Arial", 16, "bold"))
-        label.pack(pady=10)
+# --- PHẦN 1: CÀI ĐẶT ---
+st.sidebar.header("Cài đặt gộp")
+keep_header = st.sidebar.checkbox("File có chứa hàng tiêu đề", value=True, 
+                                  help="Nếu tích chọn, chương trình sẽ lấy tiêu đề từ file đầu tiên và chỉ lấy dữ liệu từ các file tiếp theo.")
 
-        btn_select = tk.Button(root, text="Bước 1: Chọn các file Excel", command=self.select_files, bg="#2196F3", fg="white")
-        btn_select.pack(pady=5)
+# --- PHẦN 2: TẢI FILE ---
+uploaded_files = st.file_uploader(
+    "Chọn các file Excel (.xlsx, .xls)", 
+    type=["xlsx", "xls"], 
+    accept_multiple_files=True
+)
 
-        self.listbox = tk.Listbox(root, selectmode=tk.MULTIPLE, width=70, height=8)
-        self.listbox.pack(pady=10, padx=10)
-
-        # Tùy chọn tiêu đề
-        self.keep_header_var = tk.BooleanVar(value=True)
-        self.check_header = tk.Checkbutton(root, text="Giữ lại hàng tiêu đề (Chỉ lấy từ file đầu tiên)", variable=self.keep_header_var)
-        self.check_header.pack(pady=5)
-
-        btn_merge = tk.Button(root, text="Bước 2: Gộp và Lưu File", command=self.merge_files, bg="#4CAF50", fg="white", font=("Arial", 10, "bold"))
-        btn_merge.pack(pady=10)
-
-        self.status_label = tk.Label(root, text="Chờ chọn file...", fg="gray")
-        self.status_label.pack(pady=5)
-
-    def select_files(self):
-        files = filedialog.askopenfilenames(
-            title="Chọn các file Excel để gộp",
-            filetypes=[("Excel files", "*.xlsx *.xls")]
-        )
-        if files:
-            self.file_paths = list(files)
-            self.listbox.delete(0, tk.END)
-            for f in self.file_paths:
-                self.listbox.insert(tk.END, os.path.basename(f))
-            self.status_label.config(text=f"Đã chọn {len(files)} file.", fg="blue")
-
-    def merge_files(self):
-        if not self.file_paths:
-            messagebox.showwarning("Cảnh báo", "Vui lòng chọn ít nhất một file Excel!")
-            return
-
-        save_path = filedialog.asksaveasfilename(
-            defaultextension=".xlsx",
-            filetypes=[("Excel files", "*.xlsx")],
-            title="Lưu file gộp tại..."
-        )
-
-        if not save_path:
-            return
-
-        try:
-            combined_data = []
+if uploaded_files:
+    st.info(f"Đã chọn {len(uploaded_files)} file.")
+    
+    combined_df = []
+    success_count = 0
+    
+    try:
+        for file in uploaded_files:
+            # Đọc file
+            if keep_header:
+                df = pd.read_excel(file)
+            else:
+                df = pd.read_excel(file, header=None)
             
-            for i, file in enumerate(self.file_paths):
-                # Đọc file
-                # header=0 nghĩa là lấy hàng đầu tiên làm tiêu đề
-                if self.keep_header_var.get():
-                    df = pd.read_excel(file)
-                else:
-                    # Nếu không muốn giữ tiêu đề (đọc dữ liệu thuần túy)
-                    df = pd.read_excel(file, header=None)
-                
-                combined_data.append(df)
+            combined_df.append(df)
+            success_count += 1
+        
+        # Gộp dữ liệu
+        final_df = pd.concat(combined_df, ignore_index=True)
+        
+        # --- PHẦN 3: HIỂN THỊ XEM TRƯỚC ---
+        st.subheader("👀 Xem trước dữ liệu sau khi gộp")
+        st.write(f"Tổng số dòng: {final_df.shape[0]} | Tổng số cột: {final_df.shape[1]}")
+        st.dataframe(final_df.head(100)) # Hiển thị 100 dòng đầu tiên
 
-            # Gộp các dataframe
-            final_df = pd.concat(combined_data, ignore_index=True)
+        # --- PHẦN 4: XUẤT FILE ---
+        # Tạo buffer để lưu file Excel trong bộ nhớ
+        buffer = io.BytesIO()
+        with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
+            final_df.to_excel(writer, index=False, header=keep_header, sheet_name='Sheet1')
+            # Không cần gọi writer.save() trong context manager mới
+            
+        st.divider()
+        st.download_button(
+            label="📥 Tải file đã gộp về (.xlsx)",
+            data=buffer.getvalue(),
+            file_name="merged_file.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+        st.success("Sẵn sàng để tải về!")
 
-            # Xuất file
-            # index=False để không lưu cột số thứ tự của pandas
-            final_df.to_excel(save_path, index=False, header=self.keep_header_var.get())
+    except Exception as e:
+        st.error(f"Đã xảy ra lỗi khi xử lý: {e}")
 
-            messagebox.showinfo("Thành công", f"Đã gộp {len(self.file_paths)} file thành công!\nLưu tại: {save_path}")
-            self.status_label.config(text="Hoàn thành!", fg="green")
+else:
+    st.warning("Vui lòng tải lên ít nhất một file để bắt đầu.")
 
-        except Exception as e:
-            messagebox.showerror("Lỗi", f"Đã xảy ra lỗi: {str(e)}")
-
-if __name__ == "__main__":
-    root = tk.Tk()
-    app = ExcelMergerApp(root)
-    root.mainloop()
+# Hướng dẫn nhỏ
+with st.expander("Hướng dẫn sử dụng"):
+    st.write("""
+    1. **Tải file:** Nhấn vào ô 'Browse files' hoặc kéo thả các file Excel vào.
+    2. **Tùy chỉnh:** Sử dụng thanh bên trái để chọn có giữ hàng tiêu đề hay không.
+    3. **Kiểm tra:** Xem bảng dữ liệu mẫu hiện ra để đảm bảo gộp đúng.
+    4. **Tải về:** Nhấn nút 'Tải file đã gộp về' để lưu kết quả.
+    """)
